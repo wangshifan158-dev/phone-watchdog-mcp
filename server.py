@@ -1,5 +1,9 @@
 #!/usr/bin/env python3
-"""Phone Watchdog MCP Server v2
+"""Phone Watchdog MCP Server v2.1
+
+v2.1 changes:
+  - send_bark now accepts optional url parameter for iOS Shortcuts deep link
+  - send_notification MCP tool accepts optional url parameter
 
 v2 changes:
   - Command ACK: phone confirms execution, AI can verify
@@ -24,7 +28,7 @@ MCP tools for AI:
     get_screen_time      - Today's screen time report
     lock_apps            - Send lock command (Jomo Start Session)
     unlock_apps          - Send unlock command (Jomo Stop Session)
-    send_notification    - Push a message via Bark
+    send_notification    - Push a message via Bark (with optional url for deep link)
     watchdog_health      - Full system health: heartbeat, command status, data freshness
 
 Usage:
@@ -208,7 +212,7 @@ def get_command():
     if not COMMAND_FILE.exists():
         return jsonify({"command": "none"})
     data = read_json(COMMAND_FILE, {"command": "none"})
-    # Don't delete yet — wait for ACK. Mark as delivered.
+    # Don't delete yet - wait for ACK. Mark as delivered.
     if data.get("command") != "none" and not data.get("delivered"):
         data["delivered"] = True
         data["delivered_at"] = now_str()
@@ -253,7 +257,7 @@ TOOLS = [
     {"name": "get_screen_time", "description": "Today's screen time report from Jomo", "inputSchema": {"type": "object", "properties": {}}},
     {"name": "lock_apps", "description": "Lock the phone by starting a Jomo session", "inputSchema": {"type": "object", "properties": {}}},
     {"name": "unlock_apps", "description": "Unlock the phone by stopping the Jomo session", "inputSchema": {"type": "object", "properties": {}}},
-    {"name": "send_notification", "description": "Push a notification to the phone via Bark", "inputSchema": {"type": "object", "properties": {"title": {"type": "string"}, "body": {"type": "string"}}, "required": ["body"]}},
+    {"name": "send_notification", "description": "Push a notification to the phone via Bark. Use url parameter to deep-link into an iOS Shortcut.", "inputSchema": {"type": "object", "properties": {"title": {"type": "string"}, "body": {"type": "string"}, "url": {"type": "string", "description": "Optional deep link URL, e.g. shortcuts://run-shortcut?name=YourShortcut"}}, "required": ["body"]}},
     {"name": "watchdog_health", "description": "Full system health: phone heartbeat, pending commands, ACK status, data freshness", "inputSchema": {"type": "object", "properties": {}}},
 ]
 
@@ -270,11 +274,12 @@ def set_command(cmd):
     write_json(COMMAND_FILE, data)
     return data
 
-def send_bark(title, body):
+def send_bark(title, body, url=None):
     if not BARK_URL:
         return {"ok": False, "error": "BARK_URL not configured"}
     try:
-        r = req.post(f"{BARK_URL}/{title}/{body}", timeout=10)
+        params = {"url": url} if url else {}
+        r = req.post(f"{BARK_URL}/{title}/{body}", params=params, timeout=10)
         return {"ok": r.status_code == 200, "status": r.status_code}
     except Exception as e:
         return {"ok": False, "error": str(e)}
@@ -341,7 +346,7 @@ def process(d):
         return {"jsonrpc": "2.0", "id": rid, "result": {
             "protocolVersion": "2024-11-05",
             "capabilities": {"tools": {}},
-            "serverInfo": {"name": "phone-watchdog-mcp", "version": "2.0.0"},
+            "serverInfo": {"name": "phone-watchdog-mcp", "version": "2.1.0"},
         }}
 
     if m == "notifications/initialized":
@@ -416,9 +421,10 @@ def process(d):
             if n == "send_notification":
                 title = str(args.get("title", "Watchdog"))
                 body = str(args.get("body", ""))
+                url = str(args.get("url", "")) or None
                 if not body:
                     return err_text(rid, "body is required")
-                r = send_bark(title, body)
+                r = send_bark(title, body, url=url)
                 return ok_text(rid, json.dumps(r, ensure_ascii=False))
 
             if n == "watchdog_health":
@@ -445,7 +451,7 @@ def mcp():
 # --- Entry ---
 
 if __name__ == "__main__":
-    print(f"Phone Watchdog MCP v2 starting on {HOST}:{PORT}")
+    print(f"Phone Watchdog MCP v2.1 starting on {HOST}:{PORT}")
     print(f"  Data dir: {DATA}")
     print(f"  Bark: {'configured' if BARK_URL else 'not configured'}")
     print(f"  Heartbeat timeout: {HEARTBEAT_TIMEOUT}s")
